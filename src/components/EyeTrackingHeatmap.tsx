@@ -35,7 +35,7 @@ const EyeTrackingHeatmap: React.FC = () => {
         eyeTrackerRef.current = eyeTracker
 
         // Initialize heatmap renderer
-        const heatmapRenderer = new HeatmapRenderer(heatmapCanvasRef.current)
+        const heatmapRenderer = new HeatmapRenderer(heatmapCanvasRef.current!)
         heatmapRendererRef.current = heatmapRenderer
 
         setIsInitialized(true)

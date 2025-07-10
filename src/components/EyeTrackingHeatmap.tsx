@@ -19,33 +19,39 @@ const EyeTrackingHeatmap: React.FC = () => {
   const [currentGaze, setCurrentGaze] = useState<GazePoint | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isInitializing, setIsInitializing] = useState(false)
   const [fps, setFps] = useState(0)
 
   const fpsCounterRef = useRef({ frames: 0, lastTime: Date.now() })
 
   // Initialize eye tracker and heatmap renderer
-  useEffect(() => {
-    const initializeTracking = async () => {
-      try {
-        if (!videoRef.current || !canvasRef.current || !heatmapCanvasRef.current) return
+  const initializeTracking = useCallback(async () => {
+    try {
+      if (!videoRef.current || !canvasRef.current || !heatmapCanvasRef.current) return
 
-        // Initialize eye tracker
-        const eyeTracker = new EyeTracker(videoRef.current)
-        await eyeTracker.initialize()
-        eyeTrackerRef.current = eyeTracker
+      setIsInitializing(true)
+      setError(null)
 
-        // Initialize heatmap renderer
-        const heatmapRenderer = new HeatmapRenderer(heatmapCanvasRef.current!)
-        heatmapRendererRef.current = heatmapRenderer
+      // Initialize eye tracker
+      const eyeTracker = new EyeTracker(videoRef.current)
+      await eyeTracker.initialize()
+      eyeTrackerRef.current = eyeTracker
 
-        setIsInitialized(true)
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to initialize eye tracking')
-        console.error('Initialization error:', err)
-      }
+      // Initialize heatmap renderer
+      const heatmapRenderer = new HeatmapRenderer(heatmapCanvasRef.current!)
+      heatmapRendererRef.current = heatmapRenderer
+
+      setIsInitialized(true)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to initialize eye tracking')
+      console.error('Initialization error:', err)
+    } finally {
+      setIsInitializing(false)
     }
+  }, [])
 
+  useEffect(() => {
     initializeTracking()
 
     return () => {
@@ -56,7 +62,7 @@ const EyeTrackingHeatmap: React.FC = () => {
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [])
+  }, [initializeTracking])
 
   // Resize handlers
   useEffect(() => {
@@ -141,9 +147,57 @@ const EyeTrackingHeatmap: React.FC = () => {
     return (
       <div className="error-container">
         <div className="error-message">
-          <h2>Error</h2>
-          <p>{error}</p>
-          <p>Please ensure you're using a modern browser with camera access enabled.</p>
+          <h2>🔴 Eye Tracking Initialization Failed</h2>
+          <p className="error-text">{error}</p>
+          
+          <div className="error-help">
+            <h3>💡 Troubleshooting Steps:</h3>
+            <ul>
+              <li>
+                <strong>Camera Permission:</strong> Make sure you clicked "Allow" when prompted for camera access
+              </li>
+              <li>
+                <strong>Browser Support:</strong> Use Chrome, Firefox, Safari, or Edge (latest versions)
+              </li>
+              <li>
+                <strong>Secure Connection:</strong> Ensure you're using HTTPS or localhost
+              </li>
+              <li>
+                <strong>Camera Availability:</strong> Close other applications that might be using your camera
+              </li>
+              <li>
+                <strong>Privacy Settings:</strong> Check your browser's camera permissions in settings
+              </li>
+            </ul>
+          </div>
+          
+          <div className="error-actions">
+            <button 
+              onClick={() => window.location.reload()} 
+              className="retry-button"
+            >
+              🔄 Reload Page
+            </button>
+            <button 
+              onClick={initializeTracking} 
+              className="retry-button"
+              disabled={isInitializing}
+            >
+              {isInitializing ? '⏳ Initializing...' : '🔄 Retry'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (isInitializing) {
+    return (
+      <div className="loading-container">
+        <div className="loading-message">
+          <div className="spinner"></div>
+          <h2>🎥 Initializing Eye Tracking...</h2>
+          <p>Please allow camera access when prompted</p>
         </div>
       </div>
     )

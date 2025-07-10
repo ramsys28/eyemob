@@ -21,6 +21,12 @@ export class EyeTracker {
 
   async initialize(): Promise<void> {
     try {
+      // Check browser compatibility
+      await this.checkBrowserCompatibility()
+      
+      // Request camera permissions explicitly
+      await this.requestCameraPermissions()
+      
       // Initialize MediaPipe FaceMesh
       this.faceMesh = new FaceMesh({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
@@ -35,7 +41,75 @@ export class EyeTracker {
 
       this.faceMesh.onResults(this.onResults.bind(this))
 
-      // Initialize camera
+      // Initialize camera with better error handling
+      await this.initializeCamera()
+      
+      this.isInitialized = true
+    } catch (error) {
+      console.error('Failed to initialize eye tracker:', error)
+      
+      // Provide specific error messages
+      if (error instanceof Error) {
+        throw error
+      } else {
+        throw new Error('Failed to initialize eye tracker. Please check camera permissions.')
+      }
+    }
+  }
+
+  private async checkBrowserCompatibility(): Promise<void> {
+    // Check if required APIs are available
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Your browser does not support camera access. Please use a modern browser like Chrome, Firefox, or Safari.')
+    }
+
+    // Check if running in secure context (HTTPS or localhost)
+    if (!window.isSecureContext) {
+      throw new Error('Camera access requires a secure connection (HTTPS). Please ensure you are using HTTPS.')
+    }
+  }
+
+  private async requestCameraPermissions(): Promise<void> {
+    try {
+      // Check current permission status
+      if ('permissions' in navigator) {
+        const permissionStatus = await navigator.permissions.query({ name: 'camera' as PermissionName })
+        
+        if (permissionStatus.state === 'denied') {
+          throw new Error('Camera permission has been denied. Please enable camera access in your browser settings and reload the page.')
+        }
+      }
+
+      // Test camera access
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user' }
+      })
+      
+      // Stop the test stream
+      stream.getTracks().forEach(track => track.stop())
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          throw new Error('Camera access was denied. Please click "Allow" when prompted for camera permissions.')
+        } else if (error.name === 'NotFoundError') {
+          throw new Error('No camera found. Please ensure you have a camera connected to your device.')
+        } else if (error.name === 'NotReadableError') {
+          throw new Error('Camera is already in use by another application. Please close other applications using the camera.')
+        } else if (error.name === 'OverconstrainedError') {
+          throw new Error('Camera constraints could not be satisfied. Please try with a different camera.')
+        } else {
+          throw new Error(`Camera access failed: ${error.message}`)
+        }
+      } else {
+        throw new Error('Failed to access camera. Please check your browser permissions.')
+      }
+    }
+  }
+
+  private async initializeCamera(): Promise<void> {
+    try {
+      // Initialize camera with MediaPipe Camera utility
       this.camera = new Camera(this.videoElement, {
         onFrame: async () => {
           if (this.faceMesh) {
@@ -48,11 +122,33 @@ export class EyeTracker {
       })
 
       await this.camera.start()
-      this.isInitialized = true
+      
+      // Wait for video to be ready
+      await this.waitForVideoReady()
+      
     } catch (error) {
-      console.error('Failed to initialize eye tracker:', error)
-      throw new Error('Failed to initialize eye tracker. Please check camera permissions.')
+      console.error('Camera initialization failed:', error)
+      throw new Error('Failed to initialize camera. Please ensure your camera is not being used by another application.')
     }
+  }
+
+  private async waitForVideoReady(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Camera initialization timed out. Please check your camera connection.'))
+      }, 10000) // 10 second timeout
+
+      const checkVideo = () => {
+        if (this.videoElement.readyState >= 2) { // HAVE_CURRENT_DATA
+          clearTimeout(timeout)
+          resolve()
+        } else {
+          setTimeout(checkVideo, 100)
+        }
+      }
+
+      checkVideo()
+    })
   }
 
   private onResults(results: any): void {

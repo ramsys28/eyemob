@@ -1,13 +1,13 @@
-import { FaceMesh } from '@mediapipe/face_mesh'
-import { Camera } from '@mediapipe/camera_utils'
+import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 import { GazePoint, FaceDetection } from '../types/eyeTracking'
 
 export class EyeTracker {
-  private faceMesh: FaceMesh | null = null
-  private camera: Camera | null = null
+  private faceLandmarker: FaceLandmarker | null = null
+  private stream: MediaStream | null = null
   private videoElement: HTMLVideoElement
   private isInitialized = false
   private lastGazePoint: GazePoint | null = null
+  private animationFrameId: number | null = null
   
   // MediaPipe face mesh indices for eye landmarks
   private readonly LEFT_EYE_INDICES = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
@@ -27,22 +27,29 @@ export class EyeTracker {
       // Request camera permissions explicitly
       await this.requestCameraPermissions()
       
-      // Initialize MediaPipe FaceMesh
-      this.faceMesh = new FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      // Initialize MediaPipe FaceLandmarker
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      )
+
+      this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+        },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.5,
+        minFacePresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: false
       })
 
-      this.faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      })
-
-      this.faceMesh.onResults(this.onResults.bind(this))
-
-      // Initialize camera with better error handling
+      // Initialize camera with standard getUserMedia API
       await this.initializeCamera()
+      
+      // Start the detection loop
+      this.startDetectionLoop()
       
       this.isInitialized = true
     } catch (error) {
@@ -109,19 +116,17 @@ export class EyeTracker {
 
   private async initializeCamera(): Promise<void> {
     try {
-      // Initialize camera with MediaPipe Camera utility
-      this.camera = new Camera(this.videoElement, {
-        onFrame: async () => {
-          if (this.faceMesh) {
-            await this.faceMesh.send({ image: this.videoElement })
-          }
-        },
-        width: 640,
-        height: 480,
-        facingMode: 'user'
+      // Get camera stream using standard getUserMedia
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: 640,
+          height: 480,
+          facingMode: 'user'
+        }
       })
 
-      await this.camera.start()
+      // Set video stream
+      this.videoElement.srcObject = this.stream
       
       // Wait for video to be ready
       await this.waitForVideoReady()
@@ -151,12 +156,34 @@ export class EyeTracker {
     })
   }
 
+  private startDetectionLoop(): void {
+    const detect = async () => {
+      if (!this.faceLandmarker || !this.isInitialized) {
+        return
+      }
+
+      try {
+        const timestamp = performance.now()
+        const results = this.faceLandmarker.detectForVideo(this.videoElement, timestamp)
+        this.onResults(results)
+      } catch (error) {
+        console.error('Detection error:', error)
+      }
+
+      // Schedule next detection
+      this.animationFrameId = requestAnimationFrame(detect)
+    }
+
+    // Start the detection loop
+    detect()
+  }
+
   private onResults(results: any): void {
-    if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+    if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
       return
     }
 
-    const landmarks = results.multiFaceLandmarks[0]
+    const landmarks = results.faceLandmarks[0]
     const faceDetection = this.extractFaceDetection(landmarks)
     
     if (faceDetection) {
@@ -270,12 +297,24 @@ export class EyeTracker {
   }
 
   dispose(): void {
-    if (this.camera) {
-      this.camera.stop()
+    // Stop detection loop
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId)
+      this.animationFrameId = null
     }
-    if (this.faceMesh) {
-      this.faceMesh.close()
+
+    // Stop camera stream
+    if (this.stream) {
+      this.stream.getTracks().forEach(track => track.stop())
+      this.stream = null
     }
+
+    // Close face landmarker
+    if (this.faceLandmarker) {
+      this.faceLandmarker.close()
+      this.faceLandmarker = null
+    }
+
     this.isInitialized = false
   }
 

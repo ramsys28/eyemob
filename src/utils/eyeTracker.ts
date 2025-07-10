@@ -1,13 +1,11 @@
 import { FaceMesh } from '@mediapipe/face_mesh'
 import { Camera } from '@mediapipe/camera_utils'
-import { GazePoint, FaceDetection, EyeLandmarks } from '../types/eyeTracking'
+import { GazePoint, FaceDetection } from '../types/eyeTracking'
 
 export class EyeTracker {
   private faceMesh: FaceMesh | null = null
   private camera: Camera | null = null
   private videoElement: HTMLVideoElement
-  private canvasElement: HTMLCanvasElement
-  private ctx: CanvasRenderingContext2D
   private isInitialized = false
   private lastGazePoint: GazePoint | null = null
   
@@ -17,10 +15,8 @@ export class EyeTracker {
   private readonly LEFT_IRIS_INDICES = [474, 475, 476, 477]
   private readonly RIGHT_IRIS_INDICES = [469, 470, 471, 472]
 
-  constructor(videoElement: HTMLVideoElement, canvasElement: HTMLCanvasElement) {
+  constructor(videoElement: HTMLVideoElement) {
     this.videoElement = videoElement
-    this.canvasElement = canvasElement
-    this.ctx = canvasElement.getContext('2d')!
   }
 
   async initialize(): Promise<void> {

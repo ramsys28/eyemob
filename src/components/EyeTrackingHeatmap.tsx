@@ -30,7 +30,7 @@ const EyeTrackingHeatmap: React.FC = () => {
         if (!videoRef.current || !canvasRef.current || !heatmapCanvasRef.current) return
 
         // Initialize eye tracker
-        const eyeTracker = new EyeTracker(videoRef.current, canvasRef.current)
+        const eyeTracker = new EyeTracker(videoRef.current)
         await eyeTracker.initialize()
         eyeTrackerRef.current = eyeTracker
 

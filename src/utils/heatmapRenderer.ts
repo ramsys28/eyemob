@@ -42,7 +42,7 @@ export class HeatmapRenderer {
   }
 
   addGazePoint(gazePoint: GazePoint): void {
-    if (!gazePoint || gazePoint.confidence < 0.3) {
+    if (!gazePoint || gazePoint.confidence < 0.2) { // Lowered threshold
       console.log('Rejecting gaze point - confidence too low:', gazePoint?.confidence)
       return
     }
@@ -56,9 +56,9 @@ export class HeatmapRenderer {
     }
 
     // Add intensity with Gaussian-like distribution
-    const intensity = gazePoint.confidence * 2
+    const intensity = gazePoint.confidence * 3 // Increased multiplier for more visible heatmap
     
-    console.log('Adding gaze point:', x, y, 'intensity:', intensity.toFixed(2))
+    console.log('Adding gaze point:', x, y, 'intensity:', intensity.toFixed(2), 'confidence:', gazePoint.confidence.toFixed(2))
     
     for (let dy = -this.radius; dy <= this.radius; dy++) {
       for (let dx = -this.radius; dx <= this.radius; dx++) {

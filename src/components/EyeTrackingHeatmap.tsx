@@ -29,8 +29,11 @@ const EyeTrackingHeatmap: React.FC = () => {
   // Enable debug mode if localStorage flag is set
   useEffect(() => {
     const isDebugMode = localStorage.getItem('eyeTrackingDebug') === 'true'
-    setDebugMode(isDebugMode)
-    if (isDebugMode) {
+    // Enable debug mode by default for troubleshooting
+    const shouldEnableDebug = isDebugMode || true
+    setDebugMode(shouldEnableDebug)
+    if (shouldEnableDebug) {
+      localStorage.setItem('eyeTrackingDebug', 'true')
       console.log('Debug mode enabled')
     }
   }, [])
@@ -69,11 +72,15 @@ const EyeTrackingHeatmap: React.FC = () => {
       eyeTrackerRef.current = eyeTracker
 
       console.log('Eye tracker initialized, setting up heatmap renderer...')
-      // Ensure canvas is properly set up
-      if (heatmapCanvas.width === 0 || heatmapCanvas.height === 0) {
-        heatmapCanvas.width = window.innerWidth
-        heatmapCanvas.height = window.innerHeight
-        console.log('Set canvas dimensions to:', heatmapCanvas.width, 'x', heatmapCanvas.height)
+      
+      // Ensure canvas is properly set up with current window dimensions
+      const currentWidth = window.innerWidth
+      const currentHeight = window.innerHeight
+      
+      if (heatmapCanvas.width !== currentWidth || heatmapCanvas.height !== currentHeight) {
+        heatmapCanvas.width = currentWidth
+        heatmapCanvas.height = currentHeight
+        console.log('Updated canvas dimensions to:', currentWidth, 'x', currentHeight)
       }
 
       // Final validation before creating HeatmapRenderer
@@ -88,6 +95,8 @@ const EyeTrackingHeatmap: React.FC = () => {
       setIsInitialized(true)
       setError(null)
       console.log('Eye tracking initialization successful')
+      console.log('Video dimensions:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight)
+      console.log('Canvas dimensions:', heatmapCanvas.width, 'x', heatmapCanvas.height)
       return true
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to initialize eye tracking'
@@ -141,6 +150,10 @@ const EyeTrackingHeatmap: React.FC = () => {
         heatmapCanvasRef.current.width = window.innerWidth
         heatmapCanvasRef.current.height = window.innerHeight
       }
+      if (canvasRef.current) {
+        canvasRef.current.width = window.innerWidth
+        canvasRef.current.height = window.innerHeight
+      }
       if (heatmapRendererRef.current) {
         heatmapRendererRef.current.resize()
       }
@@ -180,8 +193,23 @@ const EyeTrackingHeatmap: React.FC = () => {
     
     // Check if we have everything needed for tracking
     if (!isTracking || !eyeTrackerRef.current || !heatmapRendererRef.current) {
-      console.log('Tracking loop conditions not met - isTracking:', isTracking, 'eyeTracker:', !!eyeTrackerRef.current, 'heatmapRenderer:', !!heatmapRendererRef.current)
+      if (debugMode) {
+        console.log('Tracking loop conditions not met - isTracking:', isTracking, 'eyeTracker:', !!eyeTrackerRef.current, 'heatmapRenderer:', !!heatmapRendererRef.current)
+      }
       updateFPS() // Still update FPS even if we can't track
+      return
+    }
+
+    // Check if video is ready and has proper dimensions
+    if (!videoRef.current || 
+        videoRef.current.readyState < 2 || 
+        videoRef.current.videoWidth === 0 || 
+        videoRef.current.videoHeight === 0) {
+      if (debugMode) {
+        console.log('Video not ready for tracking - readyState:', videoRef.current?.readyState, 
+          'dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight)
+      }
+      updateFPS()
       return
     }
 
@@ -195,20 +223,22 @@ const EyeTrackingHeatmap: React.FC = () => {
           heatmapRendererRef.current.render()
         }
         
-        // Log successful gaze point processing
-        if (gazePoint.confidence > 0.5) {
+        // Log successful gaze point processing in debug mode
+        if (debugMode && gazePoint.confidence > 0.5) {
           console.log('Processing gaze point:', gazePoint.x.toFixed(0), gazePoint.y.toFixed(0), 'confidence:', gazePoint.confidence.toFixed(2))
         }
       } else {
         // No gaze point available - this is normal during face detection gaps
-        console.log('No gaze point available from eye tracker')
+        if (debugMode) {
+          console.log('No gaze point available from eye tracker')
+        }
       }
     } catch (error) {
       console.error('Error in tracking loop:', error)
     }
 
     updateFPS()
-  }, [isTracking, showHeatmap, updateFPS])
+  }, [isTracking, showHeatmap, updateFPS, debugMode])
 
   // Start/stop tracking
   const toggleTracking = useCallback(() => {
@@ -373,18 +403,27 @@ const EyeTrackingHeatmap: React.FC = () => {
         playsInline
         muted
         autoPlay
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover'
+        }}
       />
 
       {/* Canvas for eye tracking processing */}
       <canvas
         ref={canvasRef}
         className="processing-canvas"
+        width={window.innerWidth}
+        height={window.innerHeight}
       />
 
       {/* Heatmap overlay */}
       <canvas
         ref={heatmapCanvasRef}
         className="heatmap-canvas"
+        width={window.innerWidth}
+        height={window.innerHeight}
         style={{ 
           display: showHeatmap ? 'block' : 'none',
           opacity: showHeatmap ? 0.7 : 0

@@ -58,48 +58,114 @@ export class EyeTracker {
 
   private async initializeMediaPipe(): Promise<void> {
     try {
-      // Try to initialize MediaPipe with CDN first, then fallback to local
+      console.log('Attempting MediaPipe initialization...')
+
       let vision;
-      
-      try {
-        console.log('Trying to load MediaPipe from CDN...')
-        vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-        )
-      } catch (error) {
-        console.warn('CDN loading failed, trying alternative CDN...', error)
-        try {
-          vision = await FilesetResolver.forVisionTasks(
+      let initError = null;
+
+      // Try multiple loading strategies
+      const loadingStrategies = [
+        async () => {
+          console.log('Strategy 1: Primary CDN')
+          return await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+          )
+        },
+        async () => {
+          console.log('Strategy 2: Alternative CDN')
+          return await FilesetResolver.forVisionTasks(
             "https://unpkg.com/@mediapipe/tasks-vision@0.10.22/wasm"
           )
-        } catch (error2) {
-          console.warn('Alternative CDN also failed, using local fallback...', error2)
-          // Use local version from public folder
-          vision = await FilesetResolver.forVisionTasks(
-            "/wasm"
-          )
+        },
+        async () => {
+          console.log('Strategy 3: Local WASM')
+          return await FilesetResolver.forVisionTasks("/wasm")
+        }
+      ]
+
+      for (const strategy of loadingStrategies) {
+        try {
+          vision = await strategy()
+          console.log('WASM loading successful')
+          break
+        } catch (error) {
+          console.warn('Loading strategy failed:', error)
+          initError = error
         }
       }
 
-      console.log('Creating FaceLandmarker...')
-      this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-          delegate: "GPU"
-        },
-        runningMode: "VIDEO",
-        numFaces: 1,
-        minFaceDetectionConfidence: 0.3,
-        minFacePresenceConfidence: 0.3,
-        minTrackingConfidence: 0.3,
-        outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false
-      })
+      if (!vision) {
+        throw new Error(`All WASM loading strategies failed. Last error: ${initError instanceof Error ? initError.message : 'Unknown error'}`)
+      }
 
-      console.log('MediaPipe FaceLandmarker created successfully')
+      // Try CPU first (most compatible), then GPU
+      const configs = [
+        {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "CPU" as const
+          },
+          runningMode: "VIDEO" as const,
+          numFaces: 1,
+          minFaceDetectionConfidence: 0.5,
+          minFacePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+          outputFaceBlendshapes: false,
+          outputFacialTransformationMatrixes: false
+        },
+        {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU" as const
+          },
+          runningMode: "VIDEO" as const,
+          numFaces: 1,
+          minFaceDetectionConfidence: 0.3,
+          minFacePresenceConfidence: 0.3,
+          minTrackingConfidence: 0.3,
+          outputFaceBlendshapes: false,
+          outputFacialTransformationMatrixes: false
+        }
+      ]
+
+      let lastError = null
+      for (let i = 0; i < configs.length; i++) {
+        try {
+          console.log(`Trying FaceLandmarker config ${i + 1}...`)
+          this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, configs[i])
+          console.log(`FaceLandmarker created successfully with config ${i + 1}`)
+          return
+        } catch (error) {
+          console.warn(`Config ${i + 1} failed:`, error)
+          lastError = error
+        }
+      }
+
+      throw lastError || new Error('All configurations failed')
+
     } catch (error) {
       console.error('MediaPipe initialization failed:', error)
-      throw new Error(`Failed to initialize MediaPipe: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      
+      // Provide specific error messages
+      let errorMessage = 'MediaPipe initialization failed'
+      
+      if (error instanceof Error) {
+        const msg = error.message.toLowerCase()
+        
+        if (msg.includes('sharedarraybuffer')) {
+          errorMessage = 'SharedArrayBuffer not available. Please use Chrome/Edge with cross-origin isolation enabled.'
+        } else if (msg.includes('wasm')) {
+          errorMessage = 'Failed to load WASM files. Please check your internet connection and refresh the page.'
+        } else if (msg.includes('model')) {
+          errorMessage = 'Failed to load face detection model. Please check your internet connection.'
+        } else if (msg.includes('gpu')) {
+          errorMessage = 'GPU acceleration failed. Using CPU fallback.'
+        } else {
+          errorMessage = `MediaPipe error: ${error.message}`
+        }
+      }
+      
+      throw new Error(errorMessage)
     }
   }
 

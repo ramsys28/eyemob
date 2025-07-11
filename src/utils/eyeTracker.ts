@@ -66,7 +66,7 @@ export class EyeTracker {
       let vision;
       let initError = null;
 
-      // Try multiple loading strategies
+      // Try multiple loading strategies with more fallbacks
       const loadingStrategies = [
         async () => {
           console.log('Strategy 1: Primary CDN with stable version')
@@ -84,6 +84,12 @@ export class EyeTracker {
           console.log('Strategy 3: Google CDN')
           return await FilesetResolver.forVisionTasks(
             "https://storage.googleapis.com/mediapipe-assets/wasm"
+          )
+        },
+        async () => {
+          console.log('Strategy 4: Local fallback')
+          return await FilesetResolver.forVisionTasks(
+            "/node_modules/@mediapipe/tasks-vision/wasm"
           )
         }
       ]
@@ -103,7 +109,7 @@ export class EyeTracker {
         throw new Error(`All WASM loading strategies failed. Last error: ${initError instanceof Error ? initError.message : 'Unknown error'}`)
       }
 
-      // Try CPU first (most compatible), then GPU
+      // Try CPU first (most compatible), then GPU with more lenient settings
       const configs = [
         {
           baseOptions: {
@@ -112,9 +118,9 @@ export class EyeTracker {
           },
           runningMode: "VIDEO" as const,
           numFaces: 1,
-          minFaceDetectionConfidence: 0.5,
-          minFacePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
+          minFaceDetectionConfidence: 0.3, // Lowered for better detection
+          minFacePresenceConfidence: 0.3, // Lowered for better detection
+          minTrackingConfidence: 0.3, // Lowered for better detection
           outputFaceBlendshapes: false,
           outputFacialTransformationMatrixes: false
         },
@@ -125,9 +131,9 @@ export class EyeTracker {
           },
           runningMode: "VIDEO" as const,
           numFaces: 1,
-          minFaceDetectionConfidence: 0.3,
-          minFacePresenceConfidence: 0.3,
-          minTrackingConfidence: 0.3,
+          minFaceDetectionConfidence: 0.2, // Even lower for GPU
+          minFacePresenceConfidence: 0.2,
+          minTrackingConfidence: 0.2,
           outputFaceBlendshapes: false,
           outputFacialTransformationMatrixes: false
         }
@@ -136,12 +142,12 @@ export class EyeTracker {
       let lastError = null
       for (let i = 0; i < configs.length; i++) {
         try {
-          console.log(`Trying FaceLandmarker config ${i + 1}...`)
+          console.log(`Trying FaceLandmarker config ${i + 1} (${configs[i].baseOptions.delegate})...`)
           this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, configs[i])
-          console.log(`FaceLandmarker created successfully with config ${i + 1}`)
+          console.log(`FaceLandmarker created successfully with config ${i + 1} (${configs[i].baseOptions.delegate})`)
           return
         } catch (error) {
-          console.warn(`Config ${i + 1} failed:`, error)
+          console.warn(`Config ${i + 1} (${configs[i].baseOptions.delegate}) failed:`, error)
           lastError = error
         }
       }
@@ -158,13 +164,15 @@ export class EyeTracker {
         const msg = error.message.toLowerCase()
         
         if (msg.includes('sharedarraybuffer')) {
-          errorMessage = 'SharedArrayBuffer not available. Please use Chrome/Edge with cross-origin isolation enabled.'
+          errorMessage = 'SharedArrayBuffer not available. This may happen in some browsers or when not using HTTPS. Please try using Chrome or Firefox with HTTPS.'
         } else if (msg.includes('wasm')) {
-          errorMessage = 'Failed to load WASM files. Please check your internet connection and refresh the page.'
+          errorMessage = 'Failed to load WASM files. Please check your internet connection and try refreshing the page. If the issue persists, try clearing your browser cache.'
         } else if (msg.includes('model')) {
-          errorMessage = 'Failed to load face detection model. Please check your internet connection.'
+          errorMessage = 'Failed to load face detection model. Please check your internet connection and try again.'
         } else if (msg.includes('gpu')) {
-          errorMessage = 'GPU acceleration failed. Using CPU fallback.'
+          errorMessage = 'GPU acceleration failed, trying CPU fallback.'
+        } else if (msg.includes('cors')) {
+          errorMessage = 'CORS error loading MediaPipe files. Please ensure you are using HTTPS or localhost.'
         } else {
           errorMessage = `MediaPipe error: ${error.message}`
         }
@@ -175,6 +183,8 @@ export class EyeTracker {
   }
 
   private async checkBrowserCompatibility(): Promise<void> {
+    console.log('Checking browser compatibility...')
+    
     // Check if required APIs are available
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error('Your browser does not support camera access. Please use a modern browser like Chrome, Firefox, or Safari.')
@@ -184,6 +194,28 @@ export class EyeTracker {
     if (!window.isSecureContext) {
       throw new Error('Camera access requires a secure connection (HTTPS). Please ensure you are using HTTPS.')
     }
+
+    // Check SharedArrayBuffer availability (required for MediaPipe WASM)
+    if (typeof SharedArrayBuffer === 'undefined') {
+      console.warn('SharedArrayBuffer is not available. This may affect MediaPipe performance.')
+      console.warn('To enable SharedArrayBuffer, ensure your site has Cross-Origin-Embedder-Policy: require-corp and Cross-Origin-Opener-Policy: same-origin headers.')
+    } else {
+      console.log('SharedArrayBuffer is available')
+    }
+
+    // Check WebAssembly support
+    if (typeof WebAssembly === 'undefined') {
+      throw new Error('Your browser does not support WebAssembly, which is required for face detection.')
+    }
+
+    // Check Canvas 2D context support
+    const testCanvas = document.createElement('canvas')
+    const testCtx = testCanvas.getContext('2d')
+    if (!testCtx) {
+      throw new Error('Your browser does not support Canvas 2D context.')
+    }
+
+    console.log('Browser compatibility check passed')
   }
 
   private async checkNetworkConnectivity(): Promise<void> {
@@ -250,26 +282,60 @@ export class EyeTracker {
 
   private async initializeCamera(): Promise<void> {
     try {
+      console.log('Requesting camera access...')
       // Get camera stream using standard getUserMedia
       this.stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 480 },
           facingMode: 'user',
-          frameRate: { ideal: 30 }
+          frameRate: { ideal: 30, min: 15 }
         }
       })
 
+      console.log('Camera stream obtained, setting up video element...')
+      
       // Set video stream
       this.videoElement.srcObject = this.stream
       
-      // Wait for video to be ready
+      // Ensure video element has proper attributes
+      this.videoElement.autoplay = true
+      this.videoElement.playsInline = true
+      this.videoElement.muted = true
+      
+      // Force video to start playing
+      try {
+        await this.videoElement.play()
+        console.log('Video playback started')
+      } catch (playError) {
+        console.warn('Video play failed, but continuing:', playError)
+      }
+      
+      // Wait for video to be ready with better timeout handling
       await this.waitForVideoReady()
       
-      console.log('Camera initialized successfully')
+      console.log('Camera initialized successfully - Video dimensions:', 
+        this.videoElement?.videoWidth || 0, 'x', this.videoElement?.videoHeight || 0)
+      
+      // Verify video has valid dimensions
+      if (!this.videoElement || this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
+        throw new Error('Video stream has invalid dimensions. Camera may not be working properly.')
+      }
+      
     } catch (error) {
       console.error('Camera initialization failed:', error)
-      throw new Error('Failed to initialize camera. Please ensure your camera is not being used by another application.')
+      
+      // Cleanup on failure
+      if (this.stream) {
+        this.stream.getTracks().forEach(track => track.stop())
+        this.stream = null
+      }
+      
+      if (error instanceof Error) {
+        throw error
+      } else {
+        throw new Error('Failed to initialize camera. Please ensure your camera is not being used by another application.')
+      }
     }
   }
 
@@ -277,18 +343,38 @@ export class EyeTracker {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Camera initialization timed out. Please check your camera connection.'))
-      }, 10000) // 10 second timeout
+      }, 15000) // Increased timeout to 15 seconds
+
+      let attempts = 0
+      const maxAttempts = 150 // 15 seconds with 100ms intervals
 
       const checkVideo = () => {
-        if (this.videoElement.readyState >= 2) { // HAVE_CURRENT_DATA
+        attempts++
+        
+        // Check multiple conditions for video readiness
+        const hasValidDimensions = this.videoElement && this.videoElement.videoWidth > 0 && this.videoElement.videoHeight > 0
+        const isReadyState = this.videoElement && this.videoElement.readyState >= 2 // HAVE_CURRENT_DATA
+        const isPlaying = this.videoElement && !this.videoElement.paused && !this.videoElement.ended
+        
+        console.log(`Video check attempt ${attempts}: readyState=${this.videoElement?.readyState || 'N/A'}, ` +
+          `dimensions=${this.videoElement?.videoWidth || 0}x${this.videoElement?.videoHeight || 0}, ` +
+          `playing=${isPlaying}`)
+        
+        if (hasValidDimensions && isReadyState) {
           clearTimeout(timeout)
-          console.log('Video ready - dimensions:', this.videoElement.videoWidth, 'x', this.videoElement.videoHeight)
+          console.log('Video ready - dimensions:', this.videoElement?.videoWidth || 0, 'x', this.videoElement?.videoHeight || 0)
           resolve()
+        } else if (attempts >= maxAttempts) {
+          clearTimeout(timeout)
+          reject(new Error(`Video failed to initialize after ${maxAttempts} attempts. ` +
+            `Final state: readyState=${this.videoElement?.readyState || 'N/A'}, ` +
+            `dimensions=${this.videoElement?.videoWidth || 0}x${this.videoElement?.videoHeight || 0}`))
         } else {
           setTimeout(checkVideo, 100)
         }
       }
 
+      // Start checking immediately, then every 100ms
       checkVideo()
     })
   }
@@ -314,10 +400,16 @@ export class EyeTracker {
       }
 
       try {
-        // Check if video is still playing
-        if (this.videoElement.readyState < 2) {
+        // Check if video element exists and is ready
+        if (!this.videoElement || this.videoElement.readyState < 2) {
           // Video not ready, skip this frame but continue loop
-          console.log('Video not ready, readyState:', this.videoElement.readyState)
+          console.log('Video not ready, readyState:', this.videoElement?.readyState || 'N/A')
+          return
+        }
+
+        // Check for valid video dimensions
+        if (this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
+          console.warn('Video has invalid dimensions:', this.videoElement.videoWidth, 'x', this.videoElement.videoHeight)
           return
         }
 
@@ -327,9 +419,11 @@ export class EyeTracker {
         // Process results
         this.onResults(results)
         
-        // Debug logging every 2 seconds
-        if (Math.floor(timestamp / 2000) !== Math.floor((timestamp - 16) / 2000)) {
-          console.log('Detection running, faces detected:', results.faceLandmarks?.length || 0, 'video size:', this.videoElement.videoWidth, 'x', this.videoElement.videoHeight)
+        // Debug logging every 3 seconds instead of 2 to reduce spam
+        if (Math.floor(timestamp / 3000) !== Math.floor((timestamp - 16) / 3000)) {
+          console.log('Detection running, faces detected:', results.faceLandmarks?.length || 0, 
+            'video size:', this.videoElement?.videoWidth || 0, 'x', this.videoElement?.videoHeight || 0,
+            'readyState:', this.videoElement?.readyState || 'N/A')
         }
       } catch (error) {
         console.error('Detection error:', error)
@@ -381,6 +475,12 @@ export class EyeTracker {
       // Validate landmarks array
       if (!landmarks || landmarks.length < 478) {
         console.warn('Invalid landmarks array, length:', landmarks?.length)
+        return null
+      }
+
+      // Validate video element exists and has valid dimensions
+      if (!this.videoElement || this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
+        console.warn('Video element not available or has invalid dimensions')
         return null
       }
 

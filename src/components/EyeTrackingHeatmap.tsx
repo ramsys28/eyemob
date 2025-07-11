@@ -21,15 +21,30 @@ const EyeTrackingHeatmap: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [isInitializing, setIsInitializing] = useState(false)
   const [fps, setFps] = useState(0)
+  const [isMounted, setIsMounted] = useState(true)
 
   const fpsCounterRef = useRef({ frames: 0, lastTime: Date.now() })
 
   // Initialize eye tracker and heatmap renderer
   const initializeTracking = useCallback(async () => {
     try {
+      // Check if all required DOM elements are available
       if (!videoRef.current || !canvasRef.current || !heatmapCanvasRef.current) {
         console.warn('Required DOM elements not available yet')
-        return
+        return false
+      }
+
+      // Additional check to ensure elements are actually rendered in DOM
+      const heatmapCanvas = heatmapCanvasRef.current
+      if (!heatmapCanvas || !heatmapCanvas.parentElement) {
+        console.warn('Heatmap canvas not yet rendered in DOM')
+        return false
+      }
+
+      // Check if component is still mounted
+      if (!isMounted) {
+        console.warn('Component unmounted during initialization')
+        return false
       }
 
       setIsInitializing(true)
@@ -40,16 +55,16 @@ const EyeTrackingHeatmap: React.FC = () => {
       await eyeTracker.initialize()
       eyeTrackerRef.current = eyeTracker
 
-      // Initialize heatmap renderer with additional validation
-      const heatmapCanvas = heatmapCanvasRef.current
-      if (!heatmapCanvas) {
-        throw new Error('Heatmap canvas is not available')
-      }
-
       // Ensure canvas is properly set up
       if (heatmapCanvas.width === 0 || heatmapCanvas.height === 0) {
         heatmapCanvas.width = window.innerWidth
         heatmapCanvas.height = window.innerHeight
+      }
+
+      // Final validation before creating HeatmapRenderer
+      if (heatmapCanvas.width === 0 || heatmapCanvas.height === 0) {
+        console.warn('Canvas dimensions are still 0, cannot initialize heatmap renderer')
+        return false
       }
 
       const heatmapRenderer = new HeatmapRenderer(heatmapCanvas)
@@ -57,21 +72,42 @@ const EyeTrackingHeatmap: React.FC = () => {
 
       setIsInitialized(true)
       setError(null)
+      console.log('Eye tracking initialization successful')
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to initialize eye tracking')
       console.error('Initialization error:', err)
+      return false
     } finally {
       setIsInitializing(false)
     }
-  }, [])
+  }, [isMounted])
 
   useEffect(() => {
+    let retryCount = 0
+    const maxRetries = 10
+    const retryDelay = 200
+
+    const tryInitialize = async () => {
+      const success = await initializeTracking()
+      
+      if (!success && retryCount < maxRetries) {
+        retryCount++
+        console.log(`Initialization attempt ${retryCount} failed, retrying in ${retryDelay}ms...`)
+        setTimeout(tryInitialize, retryDelay)
+      } else if (!success) {
+        console.error('Failed to initialize after maximum retries')
+        setError('Failed to initialize eye tracking. Please refresh the page.')
+      }
+    }
+
     // Small delay to ensure DOM elements are fully rendered
     const timer = setTimeout(() => {
-      initializeTracking()
+      tryInitialize()
     }, 100)
 
     return () => {
+      setIsMounted(false)
       clearTimeout(timer)
       if (eyeTrackerRef.current) {
         eyeTrackerRef.current.dispose()

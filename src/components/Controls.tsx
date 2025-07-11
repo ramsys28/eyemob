@@ -6,9 +6,11 @@ interface ControlsProps {
   showHeatmap: boolean
   isInitialized: boolean
   fps: number
+  debugMode?: boolean
   onToggleTracking: () => void
   onToggleHeatmap: () => void
   onClearHeatmap: () => void
+  onToggleDebug?: () => void
 }
 
 const Controls: React.FC<ControlsProps> = ({
@@ -16,9 +18,11 @@ const Controls: React.FC<ControlsProps> = ({
   showHeatmap,
   isInitialized,
   fps,
+  debugMode = false,
   onToggleTracking,
   onToggleHeatmap,
-  onClearHeatmap
+  onClearHeatmap,
+  onToggleDebug
 }) => {
   return (
     <div className="controls-container">
@@ -59,6 +63,16 @@ const Controls: React.FC<ControlsProps> = ({
           >
             Clear Heatmap
           </button>
+
+          {onToggleDebug && (
+            <button
+              className={`control-button ${debugMode ? 'active' : ''}`}
+              onClick={onToggleDebug}
+              title="Toggle debug console logging"
+            >
+              {debugMode ? 'Disable' : 'Enable'} Debug
+            </button>
+          )}
         </div>
       </div>
     </div>

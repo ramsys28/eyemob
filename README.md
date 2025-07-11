@@ -37,7 +37,7 @@ npm install
 npm run dev
 ```
 
-4. Open your browser and navigate to `https://localhost:3000`
+4. Open your browser and navigate to `http://localhost:5173`
 
 ### Building for Production
 
@@ -55,6 +55,81 @@ npm run preview
 5. **Toggle Visibility**: Use "Show/Hide Heatmap" to toggle between heatmap and gaze indicator
 6. **Clear Data**: Click "Clear Heatmap" to reset the accumulated gaze data
 
+## Troubleshooting
+
+### Common Issues
+
+1. **FPS is 0 / No Heatmap Generated**
+   - **Enable Debug Mode**: Add `localStorage.setItem('eyeTrackingDebug', 'true')` in browser console and refresh
+   - **Check Console**: Look for initialization errors in browser console
+   - **Camera Permission**: Ensure camera access is granted
+   - **MediaPipe Loading**: Check if MediaPipe models are loading correctly
+
+2. **Camera Access Denied**
+   - Ensure you're using HTTPS or localhost
+   - Check browser permissions
+   - Try refreshing the page
+
+3. **Poor Tracking Quality**
+   - Ensure good lighting
+   - Position face 60-90cm from camera
+   - Avoid excessive head movement
+
+4. **Performance Issues**
+   - Close other browser tabs
+   - Reduce browser zoom level
+   - Check CPU usage
+
+### Debug Mode
+
+To enable detailed debug logging:
+
+```javascript
+// In browser console
+localStorage.setItem('eyeTrackingDebug', 'true')
+// Then refresh the page
+```
+
+This will show:
+- Debug panel with real-time status
+- Detailed console logging
+- Gaze point information
+- Performance metrics
+
+### Manual Testing
+
+If the app isn't working, try these manual tests:
+
+1. **Test Camera Access**:
+```javascript
+// In browser console
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(stream => {
+    console.log('Camera access works:', stream)
+    stream.getTracks().forEach(track => track.stop())
+  })
+  .catch(err => console.error('Camera access failed:', err))
+```
+
+2. **Test MediaPipe Loading**:
+```javascript
+// In browser console
+import('@mediapipe/tasks-vision')
+  .then(mp => console.log('MediaPipe loaded:', mp))
+  .catch(err => console.error('MediaPipe loading failed:', err))
+```
+
+3. **Check WASM Files**:
+   - Open browser developer tools → Network tab
+   - Refresh the page
+   - Look for failed requests to `.wasm` files
+
+### Known Issues
+
+- **Firefox**: Limited MediaPipe support, use Chrome/Safari instead
+- **Safari Mobile**: May require specific user gesture to start camera
+- **HTTPS Required**: Camera access requires secure connection
+
 ## Technical Architecture
 
 ### Core Components
@@ -67,7 +142,7 @@ npm run preview
 
 ### Eye Tracking Pipeline
 
-1. **Face Detection**: MediaPipe FaceMesh detects facial landmarks
+1. **Face Detection**: MediaPipe FaceLandmarker detects facial landmarks
 2. **Eye Landmark Extraction**: Extracts eye and iris coordinates
 3. **Gaze Estimation**: Calculates gaze direction from iris position
 4. **Screen Mapping**: Maps gaze vector to screen coordinates
@@ -132,11 +207,11 @@ src/
 Eye tracking parameters can be adjusted in the `EyeTracker` class:
 
 ```typescript
-// MediaPipe FaceMesh options
-maxNumFaces: 1,
-refineLandmarks: true,
-minDetectionConfidence: 0.5,
-minTrackingConfidence: 0.5
+// MediaPipe FaceLandmarker options
+numFaces: 1,
+minFaceDetectionConfidence: 0.3,
+minFacePresenceConfidence: 0.3,
+minTrackingConfidence: 0.3
 ```
 
 Heatmap appearance can be customized in the `HeatmapRenderer` class:
@@ -146,32 +221,6 @@ Heatmap appearance can be customized in the `HeatmapRenderer` class:
 radius: 30,           // Gaussian radius
 maxIntensity: 100,    // Maximum intensity value
 colorStops: [...]     // Color gradient stops
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Camera Access Denied**
-   - Ensure you're using HTTPS
-   - Check browser permissions
-   - Try refreshing the page
-
-2. **Poor Tracking Quality**
-   - Ensure good lighting
-   - Position face 60-90cm from camera
-   - Avoid excessive head movement
-
-3. **Performance Issues**
-   - Close other browser tabs
-   - Reduce browser zoom level
-   - Check CPU usage
-
-### Debug Mode
-
-Add debug logging by setting:
-```typescript
-localStorage.setItem('eyeTrackingDebug', 'true')
 ```
 
 ## Contributing

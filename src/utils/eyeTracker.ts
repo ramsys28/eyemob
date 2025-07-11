@@ -303,15 +303,21 @@ export class EyeTracker {
     console.log('Starting detection loop...')
 
     const detect = async () => {
+      // Always schedule next frame first to ensure loop continues
+      if (this.detectionActive) {
+        this.animationFrameId = requestAnimationFrame(detect)
+      }
+      
       if (!this.faceLandmarker || !this.isInitialized || !this.detectionActive) {
+        console.log('Detection loop conditions not met - landmarker:', !!this.faceLandmarker, 'initialized:', this.isInitialized, 'active:', this.detectionActive)
         return
       }
 
       try {
         // Check if video is still playing
         if (this.videoElement.readyState < 2) {
-          // Video not ready, skip this frame
-          this.animationFrameId = requestAnimationFrame(detect)
+          // Video not ready, skip this frame but continue loop
+          console.log('Video not ready, readyState:', this.videoElement.readyState)
           return
         }
 
@@ -321,18 +327,13 @@ export class EyeTracker {
         // Process results
         this.onResults(results)
         
-        // Debug logging every 60 frames (~2 seconds at 30fps)
-        if (Math.floor(timestamp / 1000) % 2 === 0 && timestamp % 1000 < 50) {
-          console.log('Detection running, faces detected:', results.faceLandmarks?.length || 0)
+        // Debug logging every 2 seconds
+        if (Math.floor(timestamp / 2000) !== Math.floor((timestamp - 16) / 2000)) {
+          console.log('Detection running, faces detected:', results.faceLandmarks?.length || 0, 'video size:', this.videoElement.videoWidth, 'x', this.videoElement.videoHeight)
         }
       } catch (error) {
         console.error('Detection error:', error)
         // Continue detection even if there's an error
-      }
-
-      // Schedule next detection
-      if (this.detectionActive) {
-        this.animationFrameId = requestAnimationFrame(detect)
       }
     }
 
@@ -341,10 +342,16 @@ export class EyeTracker {
   }
 
   private onResults(results: any): void {
+    if (!results) {
+      console.warn('No results from MediaPipe detection')
+      return
+    }
+    
     if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
       // No face detected, clear last gaze point after some time
       if (this.lastGazePoint && Date.now() - this.lastGazePoint.timestamp > 500) {
         this.lastGazePoint = null
+        console.log('Cleared old gaze point due to no face detection')
       }
       return
     }
@@ -357,10 +364,12 @@ export class EyeTracker {
         const gazePoint = this.calculateGazePoint(faceDetection)
         this.lastGazePoint = gazePoint
         
-        // Debug logging
-        if (gazePoint.confidence > 0.5) {
-          console.log('High confidence gaze point:', gazePoint.x.toFixed(0), gazePoint.y.toFixed(0), 'confidence:', gazePoint.confidence.toFixed(2))
+        // Debug logging for successful gaze points
+        if (gazePoint.confidence > 0.3) {
+          console.log('Gaze point calculated:', gazePoint.x.toFixed(0), gazePoint.y.toFixed(0), 'confidence:', gazePoint.confidence.toFixed(2))
         }
+      } else {
+        console.log('Face detected but could not extract eye landmarks')
       }
     } catch (error) {
       console.error('Error processing detection results:', error)

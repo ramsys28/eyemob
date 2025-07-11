@@ -156,16 +156,32 @@ const EyeTrackingHeatmap: React.FC = () => {
     fpsCounterRef.current.frames++
     
     if (now - fpsCounterRef.current.lastTime >= 1000) {
-      setFps(fpsCounterRef.current.frames)
+      const currentFps = fpsCounterRef.current.frames
+      setFps(currentFps)
+      
+      // Auto-enable debug mode if FPS is 0 for troubleshooting
+      if (currentFps === 0 && isTracking && !debugMode) {
+        console.warn('FPS is 0, enabling debug mode for troubleshooting...')
+        setDebugMode(true)
+        localStorage.setItem('eyeTrackingDebug', 'true')
+      }
+      
       fpsCounterRef.current.frames = 0
       fpsCounterRef.current.lastTime = now
     }
-  }, [])
+  }, [isTracking, debugMode])
 
   // Main tracking loop
   const trackingLoop = useCallback(() => {
+    // Always schedule next frame first to avoid stopping the loop
+    if (isTracking) {
+      animationFrameRef.current = requestAnimationFrame(trackingLoop)
+    }
+    
+    // Check if we have everything needed for tracking
     if (!isTracking || !eyeTrackerRef.current || !heatmapRendererRef.current) {
-      console.log('Tracking loop stopped - isTracking:', isTracking, 'eyeTracker:', !!eyeTrackerRef.current, 'heatmapRenderer:', !!heatmapRendererRef.current)
+      console.log('Tracking loop conditions not met - isTracking:', isTracking, 'eyeTracker:', !!eyeTrackerRef.current, 'heatmapRenderer:', !!heatmapRendererRef.current)
+      updateFPS() // Still update FPS even if we can't track
       return
     }
 
@@ -184,7 +200,7 @@ const EyeTrackingHeatmap: React.FC = () => {
           console.log('Processing gaze point:', gazePoint.x.toFixed(0), gazePoint.y.toFixed(0), 'confidence:', gazePoint.confidence.toFixed(2))
         }
       } else {
-        // No gaze point available
+        // No gaze point available - this is normal during face detection gaps
         console.log('No gaze point available from eye tracker')
       }
     } catch (error) {
@@ -192,7 +208,6 @@ const EyeTrackingHeatmap: React.FC = () => {
     }
 
     updateFPS()
-    animationFrameRef.current = requestAnimationFrame(trackingLoop)
   }, [isTracking, showHeatmap, updateFPS])
 
   // Start/stop tracking
@@ -207,6 +222,7 @@ const EyeTrackingHeatmap: React.FC = () => {
       setIsTracking(false)
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = undefined
       }
     } else {
       console.log('Starting tracking...')
@@ -224,8 +240,11 @@ const EyeTrackingHeatmap: React.FC = () => {
         return
       }
       
+      console.log('All components ready, starting tracking loop...')
       setIsTracking(true)
-      // Start tracking loop immediately
+      
+      // Start tracking loop immediately since we've verified all components are ready
+      // The trackingLoop will handle the state check internally
       requestAnimationFrame(trackingLoop)
     }
   }, [isInitialized, isTracking, trackingLoop])
@@ -244,6 +263,16 @@ const EyeTrackingHeatmap: React.FC = () => {
       if (heatmapRendererRef.current) {
         heatmapRendererRef.current.setVisible(newValue)
       }
+      return newValue
+    })
+  }, [])
+
+  // Toggle debug mode
+  const toggleDebug = useCallback(() => {
+    setDebugMode(prev => {
+      const newValue = !prev
+      localStorage.setItem('eyeTrackingDebug', newValue.toString())
+      console.log('Debug mode', newValue ? 'enabled' : 'disabled')
       return newValue
     })
   }, [])
@@ -374,9 +403,11 @@ const EyeTrackingHeatmap: React.FC = () => {
         showHeatmap={showHeatmap}
         isInitialized={isInitialized}
         fps={fps}
+        debugMode={debugMode}
         onToggleTracking={toggleTracking}
         onToggleHeatmap={toggleHeatmap}
         onClearHeatmap={clearHeatmap}
+        onToggleDebug={toggleDebug}
       />
     </div>
   )

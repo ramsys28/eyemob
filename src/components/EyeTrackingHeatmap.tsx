@@ -95,7 +95,7 @@ const EyeTrackingHeatmap: React.FC = () => {
       setIsInitialized(true)
       setError(null)
       console.log('Eye tracking initialization successful')
-      console.log('Video dimensions:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight)
+      console.log('Video dimensions:', videoRef.current?.videoWidth || 0, 'x', videoRef.current?.videoHeight || 0)
       console.log('Canvas dimensions:', heatmapCanvas.width, 'x', heatmapCanvas.height)
       return true
     } catch (err) {
@@ -206,8 +206,8 @@ const EyeTrackingHeatmap: React.FC = () => {
         videoRef.current.videoWidth === 0 || 
         videoRef.current.videoHeight === 0) {
       if (debugMode) {
-        console.log('Video not ready for tracking - readyState:', videoRef.current?.readyState, 
-          'dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight)
+        console.log('Video not ready for tracking - readyState:', videoRef.current?.readyState || 'N/A', 
+          'dimensions:', videoRef.current?.videoWidth || 0, 'x', videoRef.current?.videoHeight || 0)
       }
       updateFPS()
       return

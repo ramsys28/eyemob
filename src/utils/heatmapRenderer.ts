@@ -42,15 +42,23 @@ export class HeatmapRenderer {
   }
 
   addGazePoint(gazePoint: GazePoint): void {
-    if (!gazePoint || gazePoint.confidence < 0.3) return
+    if (!gazePoint || gazePoint.confidence < 0.3) {
+      console.log('Rejecting gaze point - confidence too low:', gazePoint?.confidence)
+      return
+    }
 
-    const x = Math.floor(gazePoint.x)
-    const y = Math.floor(gazePoint.y)
+    const x = Math.round(gazePoint.x)  // Use round instead of floor for better precision
+    const y = Math.round(gazePoint.y)
     
-    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) {
+      console.log('Gaze point outside canvas bounds:', x, y, 'canvas size:', this.width, this.height)
+      return
+    }
 
     // Add intensity with Gaussian-like distribution
     const intensity = gazePoint.confidence * 2
+    
+    console.log('Adding gaze point:', x, y, 'intensity:', intensity.toFixed(2))
     
     for (let dy = -this.radius; dy <= this.radius; dy++) {
       for (let dx = -this.radius; dx <= this.radius; dx++) {
@@ -75,8 +83,12 @@ export class HeatmapRenderer {
   }
 
   render(): void {
-    if (!this.isVisible) return
+    if (!this.isVisible) {
+      console.log('Heatmap not visible, skipping render')
+      return
+    }
 
+    console.log('Rendering heatmap...')
     this.ctx.clearRect(0, 0, this.width, this.height)
 
     // Create image data
@@ -85,13 +97,22 @@ export class HeatmapRenderer {
 
     // Find max intensity for normalization
     let maxValue = 0
+    let totalPoints = 0
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         maxValue = Math.max(maxValue, this.heatmapData[y][x])
+        if (this.heatmapData[y][x] > 0) {
+          totalPoints++
+        }
       }
     }
 
-    if (maxValue === 0) return
+    console.log('Heatmap render stats - Max value:', maxValue.toFixed(2), 'Total points:', totalPoints)
+
+    if (maxValue === 0) {
+      console.log('No heatmap data to render')
+      return
+    }
 
     // Render heatmap
     for (let y = 0; y < this.height; y++) {
@@ -109,6 +130,7 @@ export class HeatmapRenderer {
 
     this.ctx.putImageData(imageData, 0, 0)
     this.applyBlur()
+    console.log('Heatmap rendered successfully')
   }
 
   private getHeatmapColor(value: number): [number, number, number, number] {
@@ -161,6 +183,7 @@ export class HeatmapRenderer {
   }
 
   resize(): void {
+    console.log('Resizing heatmap canvas from', this.width, 'x', this.height, 'to', window.innerWidth, 'x', window.innerHeight)
     this.width = window.innerWidth
     this.height = window.innerHeight
     this.canvas.width = this.width

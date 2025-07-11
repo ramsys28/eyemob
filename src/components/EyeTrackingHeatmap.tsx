@@ -22,12 +22,24 @@ const EyeTrackingHeatmap: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(false)
   const [fps, setFps] = useState(0)
   const [isMounted, setIsMounted] = useState(true)
+  const [debugMode, setDebugMode] = useState(false)
 
   const fpsCounterRef = useRef({ frames: 0, lastTime: Date.now() })
+
+  // Enable debug mode if localStorage flag is set
+  useEffect(() => {
+    const isDebugMode = localStorage.getItem('eyeTrackingDebug') === 'true'
+    setDebugMode(isDebugMode)
+    if (isDebugMode) {
+      console.log('Debug mode enabled')
+    }
+  }, [])
 
   // Initialize eye tracker and heatmap renderer
   const initializeTracking = useCallback(async () => {
     try {
+      console.log('Starting initialization process...')
+      
       // Check if all required DOM elements are available
       if (!videoRef.current || !canvasRef.current || !heatmapCanvasRef.current) {
         console.warn('Required DOM elements not available yet')
@@ -50,15 +62,18 @@ const EyeTrackingHeatmap: React.FC = () => {
       setIsInitializing(true)
       setError(null)
 
+      console.log('Initializing eye tracker...')
       // Initialize eye tracker
       const eyeTracker = new EyeTracker(videoRef.current)
       await eyeTracker.initialize()
       eyeTrackerRef.current = eyeTracker
 
+      console.log('Eye tracker initialized, setting up heatmap renderer...')
       // Ensure canvas is properly set up
       if (heatmapCanvas.width === 0 || heatmapCanvas.height === 0) {
         heatmapCanvas.width = window.innerWidth
         heatmapCanvas.height = window.innerHeight
+        console.log('Set canvas dimensions to:', heatmapCanvas.width, 'x', heatmapCanvas.height)
       }
 
       // Final validation before creating HeatmapRenderer
@@ -75,7 +90,8 @@ const EyeTrackingHeatmap: React.FC = () => {
       console.log('Eye tracking initialization successful')
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to initialize eye tracking')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to initialize eye tracking'
+      setError(errorMessage)
       console.error('Initialization error:', err)
       return false
     } finally {
@@ -148,16 +164,31 @@ const EyeTrackingHeatmap: React.FC = () => {
 
   // Main tracking loop
   const trackingLoop = useCallback(() => {
-    if (!isTracking || !eyeTrackerRef.current || !heatmapRendererRef.current) return
+    if (!isTracking || !eyeTrackerRef.current || !heatmapRendererRef.current) {
+      console.log('Tracking loop stopped - isTracking:', isTracking, 'eyeTracker:', !!eyeTrackerRef.current, 'heatmapRenderer:', !!heatmapRendererRef.current)
+      return
+    }
 
-    const gazePoint = eyeTrackerRef.current.getGazePoint()
-    if (gazePoint) {
-      setCurrentGaze(gazePoint)
-      heatmapRendererRef.current.addGazePoint(gazePoint)
-      
-      if (showHeatmap) {
-        heatmapRendererRef.current.render()
+    try {
+      const gazePoint = eyeTrackerRef.current.getGazePoint()
+      if (gazePoint) {
+        setCurrentGaze(gazePoint)
+        heatmapRendererRef.current.addGazePoint(gazePoint)
+        
+        if (showHeatmap) {
+          heatmapRendererRef.current.render()
+        }
+        
+        // Log successful gaze point processing
+        if (gazePoint.confidence > 0.5) {
+          console.log('Processing gaze point:', gazePoint.x.toFixed(0), gazePoint.y.toFixed(0), 'confidence:', gazePoint.confidence.toFixed(2))
+        }
+      } else {
+        // No gaze point available
+        console.log('No gaze point available from eye tracker')
       }
+    } catch (error) {
+      console.error('Error in tracking loop:', error)
     }
 
     updateFPS()
@@ -166,16 +197,36 @@ const EyeTrackingHeatmap: React.FC = () => {
 
   // Start/stop tracking
   const toggleTracking = useCallback(() => {
-    if (!isInitialized) return
+    if (!isInitialized) {
+      console.warn('Cannot toggle tracking - not initialized')
+      return
+    }
 
     if (isTracking) {
+      console.log('Stopping tracking...')
       setIsTracking(false)
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
     } else {
+      console.log('Starting tracking...')
+      
+      // Validate that all required components are ready
+      if (!eyeTrackerRef.current || !heatmapRendererRef.current) {
+        console.error('Cannot start tracking - missing required components')
+        setError('Tracking components not ready. Please try refreshing the page.')
+        return
+      }
+      
+      if (!eyeTrackerRef.current.isReady()) {
+        console.error('Cannot start tracking - eye tracker not ready')
+        setError('Eye tracker not ready. Please wait for initialization to complete.')
+        return
+      }
+      
       setIsTracking(true)
-      trackingLoop()
+      // Start tracking loop immediately
+      requestAnimationFrame(trackingLoop)
     }
   }, [isInitialized, isTracking, trackingLoop])
 
@@ -259,6 +310,33 @@ const EyeTrackingHeatmap: React.FC = () => {
 
   return (
     <div className="eye-tracking-container">
+      {/* Debug Panel */}
+      {debugMode && (
+        <div style={{
+          position: 'fixed',
+          top: '10px',
+          right: '10px',
+          background: 'rgba(0,0,0,0.8)',
+          color: 'white',
+          padding: '10px',
+          borderRadius: '5px',
+          fontSize: '12px',
+          zIndex: 1000,
+          maxWidth: '300px'
+        }}>
+          <h4>Debug Info</h4>
+          <div>Initialized: {isInitialized ? '✅' : '❌'}</div>
+          <div>Tracking: {isTracking ? '✅' : '❌'}</div>
+          <div>Eye Tracker Ready: {eyeTrackerRef.current?.isReady() ? '✅' : '❌'}</div>
+          <div>Heatmap Renderer: {heatmapRendererRef.current ? '✅' : '❌'}</div>
+          <div>Current Gaze: {currentGaze ? `${currentGaze.x.toFixed(0)}, ${currentGaze.y.toFixed(0)}` : 'None'}</div>
+          <div>Gaze Confidence: {currentGaze ? currentGaze.confidence.toFixed(2) : 'N/A'}</div>
+          <div>FPS: {fps}</div>
+          <div>Canvas Size: {heatmapCanvasRef.current?.width || 0} x {heatmapCanvasRef.current?.height || 0}</div>
+          <div>Video Size: {videoRef.current?.videoWidth || 0} x {videoRef.current?.videoHeight || 0}</div>
+        </div>
+      )}
+
       {/* Video stream (hidden) */}
       <video
         ref={videoRef}

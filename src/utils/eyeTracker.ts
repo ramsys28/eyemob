@@ -8,8 +8,9 @@ export class EyeTracker {
   private isInitialized = false
   private lastGazePoint: GazePoint | null = null
   private animationFrameId: number | null = null
+  private detectionActive = false
   
-  // MediaPipe face mesh indices for eye landmarks
+  // Updated MediaPipe face mesh indices for eye landmarks (v0.10.x)
   private readonly LEFT_EYE_INDICES = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
   private readonly RIGHT_EYE_INDICES = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
   private readonly LEFT_IRIS_INDICES = [474, 475, 476, 477]
@@ -21,37 +22,28 @@ export class EyeTracker {
 
   async initialize(): Promise<void> {
     try {
+      console.log('Starting eye tracker initialization...')
+      
       // Check browser compatibility
       await this.checkBrowserCompatibility()
       
       // Request camera permissions explicitly
       await this.requestCameraPermissions()
       
-      // Initialize MediaPipe FaceLandmarker
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-      )
-
-      this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
-        },
-        runningMode: "VIDEO",
-        numFaces: 1,
-        minFaceDetectionConfidence: 0.5,
-        minFacePresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-        outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false
-      })
-
+      // Initialize MediaPipe FaceLandmarker with local fallback
+      console.log('Initializing MediaPipe...')
+      await this.initializeMediaPipe()
+      
       // Initialize camera with standard getUserMedia API
+      console.log('Initializing camera...')
       await this.initializeCamera()
       
       // Start the detection loop
+      console.log('Starting detection loop...')
       this.startDetectionLoop()
       
       this.isInitialized = true
+      console.log('Eye tracker initialization completed successfully')
     } catch (error) {
       console.error('Failed to initialize eye tracker:', error)
       
@@ -61,6 +53,53 @@ export class EyeTracker {
       } else {
         throw new Error('Failed to initialize eye tracker. Please check camera permissions.')
       }
+    }
+  }
+
+  private async initializeMediaPipe(): Promise<void> {
+    try {
+      // Try to initialize MediaPipe with CDN first, then fallback to local
+      let vision;
+      
+      try {
+        console.log('Trying to load MediaPipe from CDN...')
+        vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+        )
+      } catch (error) {
+        console.warn('CDN loading failed, trying alternative CDN...', error)
+        try {
+          vision = await FilesetResolver.forVisionTasks(
+            "https://unpkg.com/@mediapipe/tasks-vision@0.10.22/wasm"
+          )
+        } catch (error2) {
+          console.warn('Alternative CDN also failed, using local fallback...', error2)
+          // Use local version from public folder
+          vision = await FilesetResolver.forVisionTasks(
+            "/wasm"
+          )
+        }
+      }
+
+      console.log('Creating FaceLandmarker...')
+      this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.3,
+        minFacePresenceConfidence: 0.3,
+        minTrackingConfidence: 0.3,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: false
+      })
+
+      console.log('MediaPipe FaceLandmarker created successfully')
+    } catch (error) {
+      console.error('MediaPipe initialization failed:', error)
+      throw new Error(`Failed to initialize MediaPipe: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -80,10 +119,15 @@ export class EyeTracker {
     try {
       // Check current permission status
       if ('permissions' in navigator) {
-        const permissionStatus = await navigator.permissions.query({ name: 'camera' as PermissionName })
-        
-        if (permissionStatus.state === 'denied') {
-          throw new Error('Camera permission has been denied. Please enable camera access in your browser settings and reload the page.')
+        try {
+          const permissionStatus = await navigator.permissions.query({ name: 'camera' as PermissionName })
+          
+          if (permissionStatus.state === 'denied') {
+            throw new Error('Camera permission has been denied. Please enable camera access in your browser settings and reload the page.')
+          }
+        } catch (permError) {
+          console.warn('Permission query failed:', permError)
+          // Continue anyway as some browsers don't support this API
         }
       }
 
@@ -119,9 +163,10 @@ export class EyeTracker {
       // Get camera stream using standard getUserMedia
       this.stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: 640,
-          height: 480,
-          facingMode: 'user'
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user',
+          frameRate: { ideal: 30 }
         }
       })
 
@@ -131,6 +176,7 @@ export class EyeTracker {
       // Wait for video to be ready
       await this.waitForVideoReady()
       
+      console.log('Camera initialized successfully')
     } catch (error) {
       console.error('Camera initialization failed:', error)
       throw new Error('Failed to initialize camera. Please ensure your camera is not being used by another application.')
@@ -146,6 +192,7 @@ export class EyeTracker {
       const checkVideo = () => {
         if (this.videoElement.readyState >= 2) { // HAVE_CURRENT_DATA
           clearTimeout(timeout)
+          console.log('Video ready - dimensions:', this.videoElement.videoWidth, 'x', this.videoElement.videoHeight)
           resolve()
         } else {
           setTimeout(checkVideo, 100)
@@ -157,21 +204,46 @@ export class EyeTracker {
   }
 
   private startDetectionLoop(): void {
+    if (this.detectionActive) {
+      console.warn('Detection loop already active')
+      return
+    }
+
+    this.detectionActive = true
+    console.log('Starting detection loop...')
+
     const detect = async () => {
-      if (!this.faceLandmarker || !this.isInitialized) {
+      if (!this.faceLandmarker || !this.isInitialized || !this.detectionActive) {
         return
       }
 
       try {
+        // Check if video is still playing
+        if (this.videoElement.readyState < 2) {
+          // Video not ready, skip this frame
+          this.animationFrameId = requestAnimationFrame(detect)
+          return
+        }
+
         const timestamp = performance.now()
         const results = this.faceLandmarker.detectForVideo(this.videoElement, timestamp)
+        
+        // Process results
         this.onResults(results)
+        
+        // Debug logging every 60 frames (~2 seconds at 30fps)
+        if (Math.floor(timestamp / 1000) % 2 === 0 && timestamp % 1000 < 50) {
+          console.log('Detection running, faces detected:', results.faceLandmarks?.length || 0)
+        }
       } catch (error) {
         console.error('Detection error:', error)
+        // Continue detection even if there's an error
       }
 
       // Schedule next detection
-      this.animationFrameId = requestAnimationFrame(detect)
+      if (this.detectionActive) {
+        this.animationFrameId = requestAnimationFrame(detect)
+      }
     }
 
     // Start the detection loop
@@ -180,39 +252,73 @@ export class EyeTracker {
 
   private onResults(results: any): void {
     if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
+      // No face detected, clear last gaze point after some time
+      if (this.lastGazePoint && Date.now() - this.lastGazePoint.timestamp > 500) {
+        this.lastGazePoint = null
+      }
       return
     }
 
-    const landmarks = results.faceLandmarks[0]
-    const faceDetection = this.extractFaceDetection(landmarks)
-    
-    if (faceDetection) {
-      const gazePoint = this.calculateGazePoint(faceDetection)
-      this.lastGazePoint = gazePoint
+    try {
+      const landmarks = results.faceLandmarks[0]
+      const faceDetection = this.extractFaceDetection(landmarks)
+      
+      if (faceDetection) {
+        const gazePoint = this.calculateGazePoint(faceDetection)
+        this.lastGazePoint = gazePoint
+        
+        // Debug logging
+        if (gazePoint.confidence > 0.5) {
+          console.log('High confidence gaze point:', gazePoint.x.toFixed(0), gazePoint.y.toFixed(0), 'confidence:', gazePoint.confidence.toFixed(2))
+        }
+      }
+    } catch (error) {
+      console.error('Error processing detection results:', error)
     }
   }
 
   private extractFaceDetection(landmarks: any[]): FaceDetection | null {
     try {
-      const leftEye = this.LEFT_EYE_INDICES.map(i => ({
-        x: landmarks[i].x * this.videoElement.videoWidth,
-        y: landmarks[i].y * this.videoElement.videoHeight
-      }))
+      // Validate landmarks array
+      if (!landmarks || landmarks.length < 478) {
+        console.warn('Invalid landmarks array, length:', landmarks?.length)
+        return null
+      }
 
-      const rightEye = this.RIGHT_EYE_INDICES.map(i => ({
-        x: landmarks[i].x * this.videoElement.videoWidth,
-        y: landmarks[i].y * this.videoElement.videoHeight
-      }))
+      // Extract eye landmarks with bounds checking
+      const leftEye = this.LEFT_EYE_INDICES
+        .filter(i => i < landmarks.length)
+        .map(i => ({
+          x: landmarks[i].x * this.videoElement.videoWidth,
+          y: landmarks[i].y * this.videoElement.videoHeight
+        }))
 
-      const leftIris = this.LEFT_IRIS_INDICES.map(i => ({
-        x: landmarks[i].x * this.videoElement.videoWidth,
-        y: landmarks[i].y * this.videoElement.videoHeight
-      }))
+      const rightEye = this.RIGHT_EYE_INDICES
+        .filter(i => i < landmarks.length)
+        .map(i => ({
+          x: landmarks[i].x * this.videoElement.videoWidth,
+          y: landmarks[i].y * this.videoElement.videoHeight
+        }))
 
-      const rightIris = this.RIGHT_IRIS_INDICES.map(i => ({
-        x: landmarks[i].x * this.videoElement.videoWidth,
-        y: landmarks[i].y * this.videoElement.videoHeight
-      }))
+      const leftIris = this.LEFT_IRIS_INDICES
+        .filter(i => i < landmarks.length)
+        .map(i => ({
+          x: landmarks[i].x * this.videoElement.videoWidth,
+          y: landmarks[i].y * this.videoElement.videoHeight
+        }))
+
+      const rightIris = this.RIGHT_IRIS_INDICES
+        .filter(i => i < landmarks.length)
+        .map(i => ({
+          x: landmarks[i].x * this.videoElement.videoWidth,
+          y: landmarks[i].y * this.videoElement.videoHeight
+        }))
+
+      // Validate that we have enough landmarks
+      if (leftEye.length < 8 || rightEye.length < 8 || leftIris.length < 4 || rightIris.length < 4) {
+        console.warn('Insufficient landmarks for eye detection')
+        return null
+      }
 
       // Calculate bounding box
       const allPoints = [...leftEye, ...rightEye]
@@ -248,28 +354,36 @@ export class EyeTracker {
     const leftIrisCenter = this.calculateCenter(landmarks.leftIris)
     const rightIrisCenter = this.calculateCenter(landmarks.rightIris)
     
-    // Calculate eye centers (corners)
+    // Calculate eye centers
     const leftEyeCenter = this.calculateCenter(landmarks.leftEye)
     const rightEyeCenter = this.calculateCenter(landmarks.rightEye)
     
-    // Calculate gaze direction based on iris position relative to eye center
-    const leftGazeX = (leftIrisCenter.x - leftEyeCenter.x) / (landmarks.leftEye[0].x - landmarks.leftEye[8].x)
-    const leftGazeY = (leftIrisCenter.y - leftEyeCenter.y) / (landmarks.leftEye[0].y - landmarks.leftEye[8].y)
+    // Calculate eye dimensions for normalization
+    const leftEyeWidth = Math.abs(landmarks.leftEye[0].x - landmarks.leftEye[8].x)
+    const leftEyeHeight = Math.abs(landmarks.leftEye[4].y - landmarks.leftEye[12].y)
+    const rightEyeWidth = Math.abs(landmarks.rightEye[0].x - landmarks.rightEye[8].x)
+    const rightEyeHeight = Math.abs(landmarks.rightEye[4].y - landmarks.rightEye[12].y)
     
-    const rightGazeX = (rightIrisCenter.x - rightEyeCenter.x) / (landmarks.rightEye[0].x - landmarks.rightEye[8].x)
-    const rightGazeY = (rightIrisCenter.y - rightEyeCenter.y) / (landmarks.rightEye[0].y - landmarks.rightEye[8].y)
+    // Calculate gaze direction based on iris position relative to eye center
+    const leftGazeX = leftEyeWidth > 0 ? (leftIrisCenter.x - leftEyeCenter.x) / leftEyeWidth : 0
+    const leftGazeY = leftEyeHeight > 0 ? (leftIrisCenter.y - leftEyeCenter.y) / leftEyeHeight : 0
+    
+    const rightGazeX = rightEyeWidth > 0 ? (rightIrisCenter.x - rightEyeCenter.x) / rightEyeWidth : 0
+    const rightGazeY = rightEyeHeight > 0 ? (rightIrisCenter.y - rightEyeCenter.y) / rightEyeHeight : 0
     
     // Average the gaze from both eyes
     const gazeX = (leftGazeX + rightGazeX) / 2
     const gazeY = (leftGazeY + rightGazeY) / 2
     
-    // Map to screen coordinates
-    const screenX = window.innerWidth * (0.5 + gazeX * 0.5)
-    const screenY = window.innerHeight * (0.5 + gazeY * 0.5)
+    // Map to screen coordinates with improved scaling
+    const screenX = window.innerWidth * (0.5 + gazeX * 0.8)
+    const screenY = window.innerHeight * (0.5 + gazeY * 0.8)
     
-    // Calculate confidence based on iris detection quality
+    // Calculate confidence based on iris detection quality and eye dimensions
+    const eyeQuality = Math.min(leftEyeWidth, rightEyeWidth, leftEyeHeight, rightEyeHeight)
+    const gazeDeviation = Math.abs(gazeX) + Math.abs(gazeY)
     const confidence = Math.min(1.0, Math.max(0.1, 
-      1.0 - Math.abs(gazeX) * 0.5 - Math.abs(gazeY) * 0.5
+      (eyeQuality / 20) * (1.0 - gazeDeviation * 0.3)
     ))
     
     return {
@@ -297,7 +411,10 @@ export class EyeTracker {
   }
 
   dispose(): void {
+    console.log('Disposing eye tracker...')
+    
     // Stop detection loop
+    this.detectionActive = false
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId)
       this.animationFrameId = null
@@ -316,9 +433,12 @@ export class EyeTracker {
     }
 
     this.isInitialized = false
+    this.lastGazePoint = null
+    
+    console.log('Eye tracker disposed')
   }
 
   isReady(): boolean {
-    return this.isInitialized
+    return this.isInitialized && this.detectionActive
   }
 }

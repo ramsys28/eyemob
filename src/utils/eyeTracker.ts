@@ -315,10 +315,10 @@ export class EyeTracker {
       await this.waitForVideoReady()
       
       console.log('Camera initialized successfully - Video dimensions:', 
-        this.videoElement.videoWidth, 'x', this.videoElement.videoHeight)
+        this.videoElement?.videoWidth || 0, 'x', this.videoElement?.videoHeight || 0)
       
       // Verify video has valid dimensions
-      if (this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
+      if (!this.videoElement || this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
         throw new Error('Video stream has invalid dimensions. Camera may not be working properly.')
       }
       
@@ -352,23 +352,23 @@ export class EyeTracker {
         attempts++
         
         // Check multiple conditions for video readiness
-        const hasValidDimensions = this.videoElement.videoWidth > 0 && this.videoElement.videoHeight > 0
-        const isReadyState = this.videoElement.readyState >= 2 // HAVE_CURRENT_DATA
-        const isPlaying = !this.videoElement.paused && !this.videoElement.ended
+        const hasValidDimensions = this.videoElement && this.videoElement.videoWidth > 0 && this.videoElement.videoHeight > 0
+        const isReadyState = this.videoElement && this.videoElement.readyState >= 2 // HAVE_CURRENT_DATA
+        const isPlaying = this.videoElement && !this.videoElement.paused && !this.videoElement.ended
         
-        console.log(`Video check attempt ${attempts}: readyState=${this.videoElement.readyState}, ` +
-          `dimensions=${this.videoElement.videoWidth}x${this.videoElement.videoHeight}, ` +
+        console.log(`Video check attempt ${attempts}: readyState=${this.videoElement?.readyState || 'N/A'}, ` +
+          `dimensions=${this.videoElement?.videoWidth || 0}x${this.videoElement?.videoHeight || 0}, ` +
           `playing=${isPlaying}`)
         
         if (hasValidDimensions && isReadyState) {
           clearTimeout(timeout)
-          console.log('Video ready - dimensions:', this.videoElement.videoWidth, 'x', this.videoElement.videoHeight)
+          console.log('Video ready - dimensions:', this.videoElement?.videoWidth || 0, 'x', this.videoElement?.videoHeight || 0)
           resolve()
         } else if (attempts >= maxAttempts) {
           clearTimeout(timeout)
           reject(new Error(`Video failed to initialize after ${maxAttempts} attempts. ` +
-            `Final state: readyState=${this.videoElement.readyState}, ` +
-            `dimensions=${this.videoElement.videoWidth}x${this.videoElement.videoHeight}`))
+            `Final state: readyState=${this.videoElement?.readyState || 'N/A'}, ` +
+            `dimensions=${this.videoElement?.videoWidth || 0}x${this.videoElement?.videoHeight || 0}`))
         } else {
           setTimeout(checkVideo, 100)
         }
@@ -400,10 +400,10 @@ export class EyeTracker {
       }
 
       try {
-        // Check if video is still playing and has valid dimensions
-        if (this.videoElement.readyState < 2) {
+        // Check if video element exists and is ready
+        if (!this.videoElement || this.videoElement.readyState < 2) {
           // Video not ready, skip this frame but continue loop
-          console.log('Video not ready, readyState:', this.videoElement.readyState)
+          console.log('Video not ready, readyState:', this.videoElement?.readyState || 'N/A')
           return
         }
 
@@ -422,8 +422,8 @@ export class EyeTracker {
         // Debug logging every 3 seconds instead of 2 to reduce spam
         if (Math.floor(timestamp / 3000) !== Math.floor((timestamp - 16) / 3000)) {
           console.log('Detection running, faces detected:', results.faceLandmarks?.length || 0, 
-            'video size:', this.videoElement.videoWidth, 'x', this.videoElement.videoHeight,
-            'readyState:', this.videoElement.readyState)
+            'video size:', this.videoElement?.videoWidth || 0, 'x', this.videoElement?.videoHeight || 0,
+            'readyState:', this.videoElement?.readyState || 'N/A')
         }
       } catch (error) {
         console.error('Detection error:', error)
@@ -475,6 +475,12 @@ export class EyeTracker {
       // Validate landmarks array
       if (!landmarks || landmarks.length < 478) {
         console.warn('Invalid landmarks array, length:', landmarks?.length)
+        return null
+      }
+
+      // Validate video element exists and has valid dimensions
+      if (!this.videoElement || this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
+        console.warn('Video element not available or has invalid dimensions')
         return null
       }
 

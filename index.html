@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Eye Tracking Heatmap</title>
+    <script>
+      // Enable SharedArrayBuffer fallback
+      if (!window.SharedArrayBuffer) {
+        window.SharedArrayBuffer = ArrayBuffer;
+      }
+      
+      // Log browser compatibility info
+      console.log('Browser compatibility check:', {
+        SharedArrayBuffer: 'SharedArrayBuffer' in window,
+        crossOriginIsolated: window.crossOriginIsolated,
+        secureContext: window.isSecureContext
+      });
+    </script>
     <style>
       * {
         margin: 0;

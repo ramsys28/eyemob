@@ -19,8 +19,17 @@ export class HeatmapRenderer {
   ]
 
   constructor(canvas: HTMLCanvasElement) {
+    if (!canvas) {
+      throw new Error('Canvas element is required for HeatmapRenderer')
+    }
+    
     this.canvas = canvas
-    this.ctx = canvas.getContext('2d')!
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      throw new Error('Failed to get 2D context from canvas. Canvas may not be properly initialized.')
+    }
+    
+    this.ctx = ctx
     this.width = canvas.width
     this.height = canvas.height
     this.initializeHeatmapData()

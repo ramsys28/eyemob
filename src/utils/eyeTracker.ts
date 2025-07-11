@@ -27,6 +27,9 @@ export class EyeTracker {
       // Check browser compatibility
       await this.checkBrowserCompatibility()
       
+      // Check network connectivity
+      await this.checkNetworkConnectivity()
+      
       // Request camera permissions explicitly
       await this.requestCameraPermissions()
       
@@ -66,20 +69,22 @@ export class EyeTracker {
       // Try multiple loading strategies
       const loadingStrategies = [
         async () => {
-          console.log('Strategy 1: Primary CDN')
+          console.log('Strategy 1: Primary CDN with stable version')
           return await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.11/wasm"
           )
         },
         async () => {
           console.log('Strategy 2: Alternative CDN')
           return await FilesetResolver.forVisionTasks(
-            "https://unpkg.com/@mediapipe/tasks-vision@0.10.22/wasm"
+            "https://unpkg.com/@mediapipe/tasks-vision@0.10.11/wasm"
           )
         },
         async () => {
-          console.log('Strategy 3: Local WASM')
-          return await FilesetResolver.forVisionTasks("/wasm")
+          console.log('Strategy 3: Google CDN')
+          return await FilesetResolver.forVisionTasks(
+            "https://storage.googleapis.com/mediapipe-assets/wasm"
+          )
         }
       ]
 
@@ -178,6 +183,25 @@ export class EyeTracker {
     // Check if running in secure context (HTTPS or localhost)
     if (!window.isSecureContext) {
       throw new Error('Camera access requires a secure connection (HTTPS). Please ensure you are using HTTPS.')
+    }
+  }
+
+  private async checkNetworkConnectivity(): Promise<void> {
+    try {
+      // Test basic connectivity
+      const response = await fetch('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.11/package.json', {
+        method: 'HEAD',
+        mode: 'cors'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Network check failed: ${response.status}`)
+      }
+      
+      console.log('Network connectivity check passed')
+    } catch (error) {
+      console.error('Network connectivity check failed:', error)
+      throw new Error('Network connectivity issue. Please check your internet connection.')
     }
   }
 
